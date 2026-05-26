@@ -170,6 +170,15 @@ class DnlodApp:
         self._build_ui()
         self._set_thumbnail(placeholder_thumb())
         self._refresh_genius_radio()
+        self._bind_mac_shortcuts()
+
+    # ---------- macOS clipboard shortcuts ----------
+    def _bind_mac_shortcuts(self) -> None:
+        self.root.event_add("<<Paste>>", "<Command-v>")
+        self.root.event_add("<<Copy>>", "<Command-c>")
+        self.root.event_add("<<Cut>>", "<Command-x>")
+        self.root.event_add("<<SelectAll>>", "<Command-a>")
+        self.root.event_add("<<Undo>>", "<Command-z>")
 
     # ---------- icon ----------
     def _apply_icon(self) -> None:

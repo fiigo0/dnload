@@ -91,34 +91,27 @@ if [[ ! -d "dist/Dnlod.app" ]]; then
   exit 1
 fi
 
-# ---------- package: .app + First-Launch helper into archives ----------
+# ---------- package: .app into archives ----------
 step "Packaging release archives"
 VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "dist/Dnlod.app/Contents/Info.plist")
 PKG_DIR="dist/Dnlod-v${VERSION}-macos-arm64"
 rm -rf "${PKG_DIR}"
 mkdir -p "${PKG_DIR}"
 cp -R dist/Dnlod.app "${PKG_DIR}/"
-cp First-Launch.command "${PKG_DIR}/"
-chmod +x "${PKG_DIR}/First-Launch.command"
 
 ZIP="${PKG_DIR}.zip"
-TXZ="${PKG_DIR}.tar.xz"
-rm -f "${ZIP}" "${TXZ}"
+rm -f "${ZIP}"
 
 ditto -c -k --keepParent "${PKG_DIR}" "${ZIP}"
-tar -C dist -cf - "$(basename "${PKG_DIR}")" | xz -9e -T0 > "${TXZ}"
 green "✓ Built ${ZIP}"
-green "✓ Built ${TXZ}"
 
 # ---------- summary ----------
 APP_SIZE=$(du -sh dist/Dnlod.app | awk '{print $1}')
 ZIP_SIZE=$(du -sh "${ZIP}" | awk '{print $1}')
-TXZ_SIZE=$(du -sh "${TXZ}" | awk '{print $1}')
 step "Done"
 bold "  dist/Dnlod.app   (${APP_SIZE})"
 bold "  ${ZIP}   (${ZIP_SIZE})"
-bold "  ${TXZ}   (${TXZ_SIZE})"
 echo "  Bundle id : com.alexdiaz.dnlod"
 echo "  Open with : open dist/Dnlod.app"
 echo "  Install   : mv dist/Dnlod.app /Applications/"
-echo "  Release   : gh release create vX.Y.Z -R fiigo0/dnload --title '...' --notes '...' ${ZIP} ${TXZ}"
+echo "  Release   : gh release create vX.Y.Z -R fiigo0/dnload --title '...' --notes '...' ${ZIP}"
