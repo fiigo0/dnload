@@ -172,6 +172,7 @@ class DnlodApp:
         self._set_thumbnail(placeholder_thumb())
         self._refresh_genius_radio()
         self._bind_mac_shortcuts()
+        self.output_var.trace_add("write", self._on_output_var_changed)
 
     # ---------- macOS clipboard shortcuts ----------
     def _bind_mac_shortcuts(self) -> None:
@@ -406,12 +407,16 @@ class DnlodApp:
         self.btn_all.state(state)
 
     # ---------- browse / fetch ----------
+    def _on_output_var_changed(self, *_) -> None:
+        path = self.output_var.get().strip()
+        if path:
+            self.config["default_output_dir"] = path
+            save_config(self.config)
+
     def on_browse(self) -> None:
         folder = filedialog.askdirectory(initialdir=self.output_var.get() or str(DEFAULT_DOWNLOADS))
         if folder:
             self.output_var.set(folder)
-            self.config["default_output_dir"] = folder
-            save_config(self.config)
 
     def on_open_output(self) -> None:
         open_in_finder(self.output_var.get() or str(DEFAULT_DOWNLOADS))
