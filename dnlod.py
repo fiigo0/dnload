@@ -231,6 +231,7 @@ class DnlodApp:
         url_row.columnconfigure(0, weight=1)
         ttk.Entry(url_row, textvariable=self.url_var).grid(row=0, column=0, sticky="ew", padx=(0, 8))
         ttk.Button(url_row, text="Fetch", command=self.on_fetch, style="Accent.TButton").grid(row=0, column=1)
+        ttk.Button(url_row, text="Search…", command=self.open_search).grid(row=0, column=2, padx=(6, 0))
 
         # Metadata block: thumb + text
         meta = ttk.Frame(card)
@@ -634,6 +635,10 @@ class DnlodApp:
     def open_batch(self) -> None:
         BatchDialog(self.root, self)
 
+    # ---------- search ----------
+    def open_search(self) -> None:
+        SearchDialog(self.root, self)
+
 
 class Teleprompter(Toplevel):
     """Full-screen-ish scrolling lyrics view for live performance practice."""
@@ -935,6 +940,124 @@ class BatchDialog(Toplevel):
         (outdir / f"{safe}.txt").write_text(
             header + ("=" * len(header.strip())) + "\n\n" + (lyrics or "Lyrics not found.")
         )
+
+
+class SearchDialog(Toplevel):
+    """Search YouTube by name, pick a result, and load it into the main window."""
+
+    def __init__(self, parent: Tk, app: "DnlodApp") -> None:
+        super().__init__(parent)
+        self.app = app
+        self.title("Search YouTube — Dnlod")
+        self.geometry("760x460")
+        self.minsize(600, 380)
+        self.transient(parent)
+        self.grab_set()
+
+        self._results: list[dict] = []
+
+        body = ttk.Frame(self, padding=14)
+        body.pack(fill="both", expand=True)
+        body.columnconfigure(0, weight=1)
+        body.rowconfigure(2, weight=1)
+
+        # Search input row
+        search_row = ttk.Frame(body)
+        search_row.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        search_row.columnconfigure(0, weight=1)
+        self.query_var = StringVar()
+        self.entry = ttk.Entry(search_row, textvariable=self.query_var, font=("TkDefaultFont", 12))
+        self.entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        self.btn_search = ttk.Button(search_row, text="Search", command=self._do_search, style="Accent.TButton")
+        self.btn_search.grid(row=0, column=1)
+        self.entry.bind("<Return>", lambda e: self._do_search())
+
+        self.status_lbl = ttk.Label(body, text="Type a song or video name and press Search.", foreground="#888")
+        self.status_lbl.grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 6))
+
+        # Results list
+        cols = ("title", "uploader", "duration")
+        self.tree = ttk.Treeview(body, columns=cols, show="headings", height=12, selectmode="browse")
+        self.tree.heading("title", text="Title")
+        self.tree.heading("uploader", text="Channel")
+        self.tree.heading("duration", text="Duration")
+        self.tree.column("title", width=420, anchor="w")
+        self.tree.column("uploader", width=180, anchor="w")
+        self.tree.column("duration", width=80, anchor="e")
+        self.tree.grid(row=2, column=0, sticky="nsew")
+        vsb = ttk.Scrollbar(body, orient="vertical", command=self.tree.yview)
+        vsb.grid(row=2, column=1, sticky="ns")
+        self.tree.configure(yscrollcommand=vsb.set)
+        self.tree.bind("<Double-1>", lambda e: self._select())
+        self.tree.bind("<Return>", lambda e: self._select())
+
+        # Bottom buttons
+        btns = ttk.Frame(body)
+        btns.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        ttk.Button(btns, text="Cancel", command=self.destroy).pack(side="left")
+        self.btn_select = ttk.Button(btns, text="Select & Load", command=self._select, style="Accent.TButton")
+        self.btn_select.pack(side="right")
+        self.btn_select.state(["disabled"])
+
+        self.entry.focus_set()
+
+    def _do_search(self) -> None:
+        query = self.query_var.get().strip()
+        if not query:
+            return
+        self.btn_search.state(["disabled"])
+        self.btn_select.state(["disabled"])
+        self.tree.delete(*self.tree.get_children())
+        self._results = []
+        self.status_lbl.configure(text="Searching…")
+        threading.Thread(target=self._search_worker, args=(query,), daemon=True).start()
+
+    def _search_worker(self, query: str) -> None:
+        try:
+            opts = {"quiet": True, "no_warnings": True, "extract_flat": True, "noplaylist": True}
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(f"ytsearch10:{query}", download=False)
+            entries = list((info or {}).get("entries") or [])
+            self.after(0, self._populate_results, entries)
+        except Exception as exc:
+            self.after(0, self._search_failed, str(exc))
+
+    def _populate_results(self, entries: list) -> None:
+        self.btn_search.state(["!disabled"])
+        if not entries:
+            self.status_lbl.configure(text="No results found.")
+            return
+        self._results = entries
+        for e in entries:
+            title = e.get("title") or "(untitled)"
+            uploader = e.get("uploader") or e.get("channel") or "—"
+            duration = format_duration(e.get("duration"))
+            self.tree.insert("", END, values=(title, uploader, duration))
+        self.status_lbl.configure(text=f"{len(entries)} result(s). Double-click or press Select & Load.")
+        first = self.tree.get_children()[0]
+        self.tree.selection_set(first)
+        self.tree.focus(first)
+        self.btn_select.state(["!disabled"])
+
+    def _search_failed(self, msg: str) -> None:
+        self.btn_search.state(["!disabled"])
+        self.status_lbl.configure(text=f"Search failed: {msg}")
+
+    def _select(self) -> None:
+        sel = self.tree.selection()
+        if not sel:
+            return
+        idx = self.tree.index(sel[0])
+        if idx >= len(self._results):
+            return
+        entry = self._results[idx]
+        vid_id = entry.get("id", "")
+        url = entry.get("webpage_url") or (f"https://www.youtube.com/watch?v={vid_id}" if vid_id else "")
+        if not url:
+            return
+        self.app.url_var.set(url)
+        self.destroy()
+        self.app.on_fetch()
 
 
 def main() -> None:
