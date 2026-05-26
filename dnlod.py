@@ -379,6 +379,16 @@ class DnlodApp:
         ttk.Button(prev, text="↓  Load & Download",
                    command=self._on_video_result_select).grid(row=4, column=1, sticky="ew", pady=(4, 0))
 
+        shortcuts = (
+            "Space  Pause/Resume\n"
+            "→ / ←  Seek ±10s\n"
+            "↑ / ↓  Seek ±1 min\n"
+            "F  Fullscreen   M  Mute\n"
+            "Q / Esc  Close"
+        )
+        ttk.Label(prev, text=shortcuts, font=("TkFixedFont", 9), foreground="#555",
+                  justify="left").grid(row=5, column=0, columnspan=2, sticky="w", pady=(12, 0))
+
         ttk.Separator(panel, orient="horizontal").grid(row=0, column=0, sticky="ew", pady=(PREV_H + 28, 0))
 
         # Bottom: results treeview — Title / Duration / Channel
