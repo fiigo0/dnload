@@ -15,7 +15,7 @@
 set -euo pipefail
 
 REPO="fiigo0/dnload"
-ASSET_PATTERN="Dnlod-v.*-macos-arm64\\.tar\\.xz"
+ASSET_PATTERN="Dnlod-v.*-macos-arm64\\.zip"
 
 # ---------- helpers ----------
 bold()  { printf "\033[1m%s\033[0m\n" "$*"; }
@@ -59,12 +59,12 @@ green "✓ Found Dnlod ${VERSION}"
 step "Downloading"
 TMP="$(mktemp -d)"
 trap 'rm -rf "${TMP}"' EXIT
-ARCHIVE="${TMP}/dnlod.tar.xz"
+ARCHIVE="${TMP}/dnlod.zip"
 curl -fL --progress-bar "${ASSET_URL}" -o "${ARCHIVE}"
 
 # ---------- extract ----------
 step "Extracting"
-tar -C "${TMP}" -xJf "${ARCHIVE}"
+unzip -q "${ARCHIVE}" -d "${TMP}"
 APP_SRC="$(/usr/bin/find "${TMP}" -maxdepth 3 -name 'Dnlod.app' -type d -print -quit)"
 if [[ -z "${APP_SRC}" ]]; then
   red "Dnlod.app not found inside the archive."
