@@ -224,18 +224,46 @@ class DnlodApp:
         card = ttk.LabelFrame(parent, text="  Download  ", padding=14)
         card.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
 
+        # Search section
+        ttk.Label(card, text="Search YouTube").grid(row=0, column=0, sticky="w")
+        search_row = ttk.Frame(card)
+        search_row.grid(row=1, column=0, sticky="ew", pady=(2, 4))
+        search_row.columnconfigure(0, weight=1)
+        self.search_var = StringVar()
+        self.search_entry = ttk.Entry(search_row, textvariable=self.search_var)
+        self.search_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        self.search_entry.bind("<Return>", lambda e: self.on_search_video())
+        self.btn_search_yt = ttk.Button(search_row, text="Search", command=self.on_search_video, style="Accent.TButton")
+        self.btn_search_yt.grid(row=0, column=1)
+
+        # Inline results list (hidden until a search is run)
+        self._search_results: list[dict] = []
+        self._results_frame = ttk.Frame(card)
+        self._results_frame.grid(row=2, column=0, sticky="ew", pady=(2, 4))
+        self._results_frame.columnconfigure(0, weight=1)
+        self.search_tree = ttk.Treeview(self._results_frame, show="tree", height=6, selectmode="browse")
+        self.search_tree.column("#0", stretch=True)
+        self.search_tree.grid(row=0, column=0, sticky="ew")
+        vsb = ttk.Scrollbar(self._results_frame, orient="vertical", command=self.search_tree.yview)
+        vsb.grid(row=0, column=1, sticky="ns")
+        self.search_tree.configure(yscrollcommand=vsb.set)
+        self.search_tree.bind("<Double-1>", lambda e: self._on_video_result_select())
+        self.search_tree.bind("<Return>", lambda e: self._on_video_result_select())
+        self._results_frame.grid_remove()
+
+        ttk.Separator(card, orient="horizontal").grid(row=3, column=0, sticky="ew", pady=(4, 8))
+
         # URL row
-        ttk.Label(card, text="YouTube URL").grid(row=0, column=0, sticky="w")
+        ttk.Label(card, text="YouTube URL").grid(row=4, column=0, sticky="w")
         url_row = ttk.Frame(card)
-        url_row.grid(row=1, column=0, sticky="ew", pady=(2, 12))
+        url_row.grid(row=5, column=0, sticky="ew", pady=(2, 12))
         url_row.columnconfigure(0, weight=1)
         ttk.Entry(url_row, textvariable=self.url_var).grid(row=0, column=0, sticky="ew", padx=(0, 8))
         ttk.Button(url_row, text="Fetch", command=self.on_fetch, style="Accent.TButton").grid(row=0, column=1)
-        ttk.Button(url_row, text="Search…", command=self.open_search).grid(row=0, column=2, padx=(6, 0))
 
         # Metadata block: thumb + text
         meta = ttk.Frame(card)
-        meta.grid(row=2, column=0, sticky="ew", pady=(0, 12))
+        meta.grid(row=6, column=0, sticky="ew", pady=(0, 12))
         meta.columnconfigure(1, weight=1)
 
         self.thumb_canvas = Canvas(meta, width=THUMB_W, height=THUMB_H, highlightthickness=0, bd=0)
@@ -247,9 +275,9 @@ class DnlodApp:
         ttk.Label(meta, textvariable=self.duration_var, foreground="#999").grid(row=2, column=1, sticky="w", pady=(2, 0))
 
         # Output dir
-        ttk.Label(card, text="Output folder").grid(row=3, column=0, sticky="w")
+        ttk.Label(card, text="Output folder").grid(row=7, column=0, sticky="w")
         out_row = ttk.Frame(card)
-        out_row.grid(row=4, column=0, sticky="ew", pady=(2, 14))
+        out_row.grid(row=8, column=0, sticky="ew", pady=(2, 14))
         out_row.columnconfigure(0, weight=1)
         ttk.Entry(out_row, textvariable=self.output_var).grid(row=0, column=0, sticky="ew", padx=(0, 8))
         ttk.Button(out_row, text="Browse…", command=self.on_browse).grid(row=0, column=1)
@@ -257,7 +285,7 @@ class DnlodApp:
 
         # Buttons
         btns = ttk.Frame(card)
-        btns.grid(row=5, column=0, sticky="ew", pady=(0, 10))
+        btns.grid(row=9, column=0, sticky="ew", pady=(0, 10))
         btns.columnconfigure((0, 1, 2), weight=1)
         self.btn_video = ttk.Button(btns, text="Video (MP4)", command=lambda: self.on_download("video"))
         self.btn_audio = ttk.Button(btns, text="Audio (MP3)", command=lambda: self.on_download("audio"))
@@ -269,7 +297,7 @@ class DnlodApp:
 
         # Progress
         self.progress = ttk.Progressbar(card, maximum=100)
-        self.progress.grid(row=6, column=0, sticky="ew", pady=(4, 0))
+        self.progress.grid(row=10, column=0, sticky="ew", pady=(4, 0))
 
         card.columnconfigure(0, weight=1)
 
@@ -534,9 +562,12 @@ class DnlodApp:
     def _auto_lyrics_worker(self, artist: str, song: str) -> None:
         use_genius = bool(self.config.get("genius_token", "").strip()) and HAVE_GENIUS
         lyrics = ""
+        source_used = "lyrics.ovh"
         if use_genius:
             try:
                 lyrics = self._fetch_genius(artist, song)
+                if lyrics:
+                    source_used = "genius"
             except Exception:
                 pass
         if not lyrics:
@@ -545,6 +576,7 @@ class DnlodApp:
             except Exception as exc:
                 self.root.after(0, self._show_lyrics, f"Lyrics fetch failed: {exc}")
                 return
+        self.root.after(0, self.source_var.set, source_used)
         self.root.after(0, self._show_lyrics, lyrics or "Lyrics not found.")
 
     def on_search_lyrics(self) -> None:
@@ -655,9 +687,64 @@ class DnlodApp:
     def open_batch(self) -> None:
         BatchDialog(self.root, self)
 
-    # ---------- search ----------
-    def open_search(self) -> None:
-        SearchDialog(self.root, self)
+    # ---------- video search ----------
+    def on_search_video(self) -> None:
+        query = self.search_var.get().strip()
+        if not query:
+            return
+        self.btn_search_yt.state(["disabled"])
+        self.search_tree.delete(*self.search_tree.get_children())
+        self._search_results = []
+        self._set_status("Searching YouTube…")
+        threading.Thread(target=self._search_video_worker, args=(query,), daemon=True).start()
+
+    def _search_video_worker(self, query: str) -> None:
+        try:
+            opts = {"quiet": True, "no_warnings": True, "extract_flat": True, "noplaylist": True}
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(f"ytsearch10:{query}", download=False)
+            entries = list((info or {}).get("entries") or [])
+            self.root.after(0, self._populate_video_results, entries)
+        except Exception as exc:
+            self.root.after(0, self._search_video_failed, str(exc))
+
+    def _populate_video_results(self, entries: list) -> None:
+        self.btn_search_yt.state(["!disabled"])
+        if not entries:
+            self._set_status("No results found.")
+            return
+        self._search_results = entries
+        for e in entries:
+            title = e.get("title") or "(untitled)"
+            uploader = e.get("uploader") or e.get("channel") or ""
+            duration = format_duration(e.get("duration"))
+            label = f"{title}  —  {uploader}  ({duration})" if uploader else f"{title}  ({duration})"
+            self.search_tree.insert("", END, text=label)
+        self._results_frame.grid()
+        first = self.search_tree.get_children()[0]
+        self.search_tree.selection_set(first)
+        self.search_tree.focus(first)
+        self._set_status(f"{len(entries)} results — double-click or press Enter to load.")
+
+    def _search_video_failed(self, msg: str) -> None:
+        self.btn_search_yt.state(["!disabled"])
+        self._set_status(f"Search failed: {msg}")
+
+    def _on_video_result_select(self) -> None:
+        sel = self.search_tree.selection()
+        if not sel:
+            return
+        idx = list(self.search_tree.get_children()).index(sel[0])
+        if idx >= len(self._search_results):
+            return
+        entry = self._search_results[idx]
+        vid_id = entry.get("id", "")
+        url = entry.get("webpage_url") or (f"https://www.youtube.com/watch?v={vid_id}" if vid_id else "")
+        if not url:
+            return
+        self.url_var.set(url)
+        self._results_frame.grid_remove()
+        self.on_fetch()
 
 
 class Teleprompter(Toplevel):
@@ -960,124 +1047,6 @@ class BatchDialog(Toplevel):
         (outdir / f"{safe}.txt").write_text(
             header + ("=" * len(header.strip())) + "\n\n" + (lyrics or "Lyrics not found.")
         )
-
-
-class SearchDialog(Toplevel):
-    """Search YouTube by name, pick a result, and load it into the main window."""
-
-    def __init__(self, parent: Tk, app: "DnlodApp") -> None:
-        super().__init__(parent)
-        self.app = app
-        self.title("Search YouTube — Dnlod")
-        self.geometry("760x460")
-        self.minsize(600, 380)
-        self.transient(parent)
-        self.grab_set()
-
-        self._results: list[dict] = []
-
-        body = ttk.Frame(self, padding=14)
-        body.pack(fill="both", expand=True)
-        body.columnconfigure(0, weight=1)
-        body.rowconfigure(2, weight=1)
-
-        # Search input row
-        search_row = ttk.Frame(body)
-        search_row.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
-        search_row.columnconfigure(0, weight=1)
-        self.query_var = StringVar()
-        self.entry = ttk.Entry(search_row, textvariable=self.query_var, font=("TkDefaultFont", 12))
-        self.entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
-        self.btn_search = ttk.Button(search_row, text="Search", command=self._do_search, style="Accent.TButton")
-        self.btn_search.grid(row=0, column=1)
-        self.entry.bind("<Return>", lambda e: self._do_search())
-
-        self.status_lbl = ttk.Label(body, text="Type a song or video name and press Search.", foreground="#888")
-        self.status_lbl.grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 6))
-
-        # Results list
-        cols = ("title", "uploader", "duration")
-        self.tree = ttk.Treeview(body, columns=cols, show="headings", height=12, selectmode="browse")
-        self.tree.heading("title", text="Title")
-        self.tree.heading("uploader", text="Channel")
-        self.tree.heading("duration", text="Duration")
-        self.tree.column("title", width=420, anchor="w")
-        self.tree.column("uploader", width=180, anchor="w")
-        self.tree.column("duration", width=80, anchor="e")
-        self.tree.grid(row=2, column=0, sticky="nsew")
-        vsb = ttk.Scrollbar(body, orient="vertical", command=self.tree.yview)
-        vsb.grid(row=2, column=1, sticky="ns")
-        self.tree.configure(yscrollcommand=vsb.set)
-        self.tree.bind("<Double-1>", lambda e: self._select())
-        self.tree.bind("<Return>", lambda e: self._select())
-
-        # Bottom buttons
-        btns = ttk.Frame(body)
-        btns.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(10, 0))
-        ttk.Button(btns, text="Cancel", command=self.destroy).pack(side="left")
-        self.btn_select = ttk.Button(btns, text="Select & Load", command=self._select, style="Accent.TButton")
-        self.btn_select.pack(side="right")
-        self.btn_select.state(["disabled"])
-
-        self.entry.focus_set()
-
-    def _do_search(self) -> None:
-        query = self.query_var.get().strip()
-        if not query:
-            return
-        self.btn_search.state(["disabled"])
-        self.btn_select.state(["disabled"])
-        self.tree.delete(*self.tree.get_children())
-        self._results = []
-        self.status_lbl.configure(text="Searching…")
-        threading.Thread(target=self._search_worker, args=(query,), daemon=True).start()
-
-    def _search_worker(self, query: str) -> None:
-        try:
-            opts = {"quiet": True, "no_warnings": True, "extract_flat": True, "noplaylist": True}
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(f"ytsearch10:{query}", download=False)
-            entries = list((info or {}).get("entries") or [])
-            self.after(0, self._populate_results, entries)
-        except Exception as exc:
-            self.after(0, self._search_failed, str(exc))
-
-    def _populate_results(self, entries: list) -> None:
-        self.btn_search.state(["!disabled"])
-        if not entries:
-            self.status_lbl.configure(text="No results found.")
-            return
-        self._results = entries
-        for e in entries:
-            title = e.get("title") or "(untitled)"
-            uploader = e.get("uploader") or e.get("channel") or "—"
-            duration = format_duration(e.get("duration"))
-            self.tree.insert("", END, values=(title, uploader, duration))
-        self.status_lbl.configure(text=f"{len(entries)} result(s). Double-click or press Select & Load.")
-        first = self.tree.get_children()[0]
-        self.tree.selection_set(first)
-        self.tree.focus(first)
-        self.btn_select.state(["!disabled"])
-
-    def _search_failed(self, msg: str) -> None:
-        self.btn_search.state(["!disabled"])
-        self.status_lbl.configure(text=f"Search failed: {msg}")
-
-    def _select(self) -> None:
-        sel = self.tree.selection()
-        if not sel:
-            return
-        idx = self.tree.index(sel[0])
-        if idx >= len(self._results):
-            return
-        entry = self._results[idx]
-        vid_id = entry.get("id", "")
-        url = entry.get("webpage_url") or (f"https://www.youtube.com/watch?v={vid_id}" if vid_id else "")
-        if not url:
-            return
-        self.app.url_var.set(url)
-        self.destroy()
-        self.app.on_fetch()
 
 
 def main() -> None:
