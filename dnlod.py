@@ -488,7 +488,7 @@ class DnlodApp:
                 self.root.after(0, webbrowser.open, url)
                 return
             self._preview_proc = subprocess.Popen(
-                [ffplay, "-autoexit", "-window_title", f"Preview — {title}",
+                [ffplay, "-window_title", f"Preview — {title}",
                  "-x", "640", "-y", "360", stream_url],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
