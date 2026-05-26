@@ -409,6 +409,10 @@ class DnlodApp:
         self.artist_var.set(artist)
         self.song_var.set(song)
         self._set_status("Metadata loaded.")
+        if song:
+            self.lyrics_text.delete("1.0", END)
+            self.lyrics_text.insert(END, "Searching lyrics…")
+            threading.Thread(target=self._auto_lyrics_worker, args=(artist, song), daemon=True).start()
 
     def _fetch_failed(self, msg: str) -> None:
         self._set_status("Fetch failed.")
@@ -527,6 +531,22 @@ class DnlodApp:
         messagebox.showerror("Dnlod — download failed", msg)
 
     # ---------- lyrics ----------
+    def _auto_lyrics_worker(self, artist: str, song: str) -> None:
+        use_genius = bool(self.config.get("genius_token", "").strip()) and HAVE_GENIUS
+        lyrics = ""
+        if use_genius:
+            try:
+                lyrics = self._fetch_genius(artist, song)
+            except Exception:
+                pass
+        if not lyrics:
+            try:
+                lyrics = self._fetch_lyrics_ovh(artist, song)
+            except Exception as exc:
+                self.root.after(0, self._show_lyrics, f"Lyrics fetch failed: {exc}")
+                return
+        self.root.after(0, self._show_lyrics, lyrics or "Lyrics not found.")
+
     def on_search_lyrics(self) -> None:
         artist = self.artist_var.get().strip()
         song = self.song_var.get().strip()
