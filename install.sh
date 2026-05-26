@@ -15,7 +15,6 @@
 set -euo pipefail
 
 REPO="fiigo0/dnload"
-ASSET_PATTERN="Dnlod-v.*-macos-arm64\\.zip"
 
 # ---------- helpers ----------
 bold()  { printf "\033[1m%s\033[0m\n" "$*"; }
@@ -39,15 +38,23 @@ fi
 # ---------- resolve latest release asset ----------
 step "Looking up latest Dnlod release"
 API_URL="https://api.github.com/repos/${REPO}/releases/latest"
-ASSET_URL="$(
-  curl -fsSL "${API_URL}" \
-    | grep -Eo "\"browser_download_url\"[[:space:]]*:[[:space:]]*\"[^\"]*${ASSET_PATTERN}\"" \
-    | head -1 \
-    | sed -E 's/.*"(https[^"]+)"/\1/'
-)"
+API_RESPONSE="$(curl -fsSL --connect-timeout 15 --max-time 30 "${API_URL}")" || {
+  red "Could not reach GitHub API. Check your internet connection."
+  red "  URL: ${API_URL}"
+  exit 1
+}
+
+ASSET_URL="$(echo "${API_RESPONSE}" | python3 -c "
+import sys, json
+data = json.loads(sys.stdin.read(), strict=False)
+for asset in data.get('assets', []):
+    if asset.get('name', '').endswith('-macos-arm64.zip'):
+        print(asset['browser_download_url'])
+        break
+")"
 
 if [[ -z "${ASSET_URL}" ]]; then
-  red "Could not find a matching release asset at ${API_URL}"
+  red "Could not find a macOS arm64 release asset."
   red "Check https://github.com/${REPO}/releases manually."
   exit 1
 fi
