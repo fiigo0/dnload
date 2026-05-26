@@ -8,7 +8,9 @@ import os
 import re
 import subprocess
 import sys
+import shutil
 import threading
+import webbrowser
 from pathlib import Path
 from tkinter import (
     Tk,
@@ -64,6 +66,7 @@ CONFIG_PATH = APP_DIR / "config.json"
 DEFAULT_DOWNLOADS = APP_DIR / "downloads"
 FFMPEG_DIR = _bundled_ffmpeg()
 THUMB_W, THUMB_H = 200, 112
+PREV_W, PREV_H = 300, 169
 
 
 def load_config() -> dict:
@@ -165,6 +168,9 @@ class DnlodApp:
         self.status_var = StringVar(value="Ready.")
         self.theme_var = BooleanVar(value=self.config.get("theme", "dark") == "dark")
         self._lyrics_font_size: int = self.config.get("lyrics_font_size", 11)
+        self._search_panel_url: str = ""
+        self._prev_thumb_img: ImageTk.PhotoImage | None = None
+        self._preview_proc: subprocess.Popen | None = None
 
         self._thumb_img: ImageTk.PhotoImage | None = None  # keep ref
 
@@ -214,6 +220,7 @@ class DnlodApp:
 
         self._build_left(body)
         self._build_right(body)
+        self._build_search_panel(body)
 
         # Footer
         footer = ttk.Frame(self.root, padding=(16, 6, 16, 12))
@@ -238,34 +245,19 @@ class DnlodApp:
         self.btn_search_yt = ttk.Button(search_row, text="Search", command=self.on_search_video, style="Accent.TButton")
         self.btn_search_yt.grid(row=0, column=1)
 
-        # Inline results list (hidden until a search is run)
-        self._search_results: list[dict] = []
-        self._results_frame = ttk.Frame(card)
-        self._results_frame.grid(row=2, column=0, sticky="ew", pady=(2, 4))
-        self._results_frame.columnconfigure(0, weight=1)
-        self.search_tree = ttk.Treeview(self._results_frame, show="tree", height=6, selectmode="browse")
-        self.search_tree.column("#0", stretch=True)
-        self.search_tree.grid(row=0, column=0, sticky="ew")
-        vsb = ttk.Scrollbar(self._results_frame, orient="vertical", command=self.search_tree.yview)
-        vsb.grid(row=0, column=1, sticky="ns")
-        self.search_tree.configure(yscrollcommand=vsb.set)
-        self.search_tree.bind("<Double-1>", lambda e: self._on_video_result_select())
-        self.search_tree.bind("<Return>", lambda e: self._on_video_result_select())
-        self._results_frame.grid_remove()
-
-        ttk.Separator(card, orient="horizontal").grid(row=3, column=0, sticky="ew", pady=(4, 8))
+        ttk.Separator(card, orient="horizontal").grid(row=2, column=0, sticky="ew", pady=(4, 8))
 
         # URL row
-        ttk.Label(card, text="YouTube URL").grid(row=4, column=0, sticky="w")
+        ttk.Label(card, text="YouTube URL").grid(row=3, column=0, sticky="w")
         url_row = ttk.Frame(card)
-        url_row.grid(row=5, column=0, sticky="ew", pady=(2, 12))
+        url_row.grid(row=4, column=0, sticky="ew", pady=(2, 12))
         url_row.columnconfigure(0, weight=1)
         ttk.Entry(url_row, textvariable=self.url_var).grid(row=0, column=0, sticky="ew", padx=(0, 8))
         ttk.Button(url_row, text="Fetch", command=self.on_fetch, style="Accent.TButton").grid(row=0, column=1)
 
         # Metadata block: thumb + text
         meta = ttk.Frame(card)
-        meta.grid(row=6, column=0, sticky="ew", pady=(0, 12))
+        meta.grid(row=5, column=0, sticky="ew", pady=(0, 12))
         meta.columnconfigure(1, weight=1)
 
         self.thumb_canvas = Canvas(meta, width=THUMB_W, height=THUMB_H, highlightthickness=0, bd=0)
@@ -277,9 +269,9 @@ class DnlodApp:
         ttk.Label(meta, textvariable=self.duration_var, foreground="#999").grid(row=2, column=1, sticky="w", pady=(2, 0))
 
         # Output dir
-        ttk.Label(card, text="Output folder").grid(row=7, column=0, sticky="w")
+        ttk.Label(card, text="Output folder").grid(row=6, column=0, sticky="w")
         out_row = ttk.Frame(card)
-        out_row.grid(row=8, column=0, sticky="ew", pady=(2, 14))
+        out_row.grid(row=7, column=0, sticky="ew", pady=(2, 14))
         out_row.columnconfigure(0, weight=1)
         ttk.Entry(out_row, textvariable=self.output_var).grid(row=0, column=0, sticky="ew", padx=(0, 8))
         ttk.Button(out_row, text="Browse…", command=self.on_browse).grid(row=0, column=1)
@@ -287,7 +279,7 @@ class DnlodApp:
 
         # Buttons
         btns = ttk.Frame(card)
-        btns.grid(row=9, column=0, sticky="ew", pady=(0, 10))
+        btns.grid(row=8, column=0, sticky="ew", pady=(0, 10))
         btns.columnconfigure((0, 1, 2), weight=1)
         self.btn_video = ttk.Button(btns, text="Video (MP4)", command=lambda: self.on_download("video"))
         self.btn_audio = ttk.Button(btns, text="Audio (MP3)", command=lambda: self.on_download("audio"))
@@ -299,13 +291,14 @@ class DnlodApp:
 
         # Progress
         self.progress = ttk.Progressbar(card, maximum=100)
-        self.progress.grid(row=10, column=0, sticky="ew", pady=(4, 0))
+        self.progress.grid(row=9, column=0, sticky="ew", pady=(4, 0))
 
         card.columnconfigure(0, weight=1)
 
     def _build_right(self, parent) -> None:
         card = ttk.LabelFrame(parent, text="  Lyrics  ", padding=14)
         card.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+        self._lyrics_card = card
         card.columnconfigure(0, weight=1)
         card.rowconfigure(3, weight=1)
 
@@ -351,6 +344,159 @@ class DnlodApp:
             self.lyrics_text.configure(bg="#1f1f1f", fg="#e6e6e6", insertbackground="#e6e6e6")
         else:
             self.lyrics_text.configure(bg="#ffffff", fg="#202020", insertbackground="#202020")
+
+    def _build_search_panel(self, parent) -> None:
+        self._search_results: list[dict] = []
+        panel = ttk.LabelFrame(parent, text="  Search Results  ", padding=14)
+        panel.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+        panel.columnconfigure(0, weight=1)
+        panel.rowconfigure(1, weight=1)
+        self._search_panel = panel
+        panel.grid_remove()
+
+        # Top: preview pane (thumbnail left, info + buttons right)
+        prev = ttk.Frame(panel)
+        prev.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        prev.columnconfigure(1, weight=1)
+
+        self._prev_canvas = Canvas(prev, width=PREV_W, height=PREV_H, highlightthickness=0, bd=0)
+        self._prev_canvas.grid(row=0, column=0, rowspan=5, padx=(0, 12))
+        self._set_prev_thumbnail(placeholder_thumb())
+
+        self._prev_title_var = StringVar()
+        self._prev_channel_var = StringVar()
+        self._prev_dur_var = StringVar()
+        ttk.Label(prev, textvariable=self._prev_title_var, font=("TkDefaultFont", 11, "bold"),
+                  wraplength=240, justify="left").grid(row=0, column=1, sticky="nw")
+        ttk.Label(prev, textvariable=self._prev_dur_var,
+                  foreground="#999").grid(row=1, column=1, sticky="w", pady=(4, 0))
+        ttk.Label(prev, textvariable=self._prev_channel_var,
+                  foreground="#999").grid(row=2, column=1, sticky="w", pady=(2, 0))
+        self._btn_play_prev = ttk.Button(prev, text="▶  Play",
+                                         command=self._play_preview, style="Accent.TButton")
+        self._btn_play_prev.grid(row=3, column=1, sticky="ew", pady=(10, 0))
+        self._btn_play_prev.state(["disabled"])
+        ttk.Button(prev, text="↓  Load & Download",
+                   command=self._on_video_result_select).grid(row=4, column=1, sticky="ew", pady=(4, 0))
+
+        ttk.Separator(panel, orient="horizontal").grid(row=0, column=0, sticky="ew", pady=(PREV_H + 28, 0))
+
+        # Bottom: results treeview — Title / Duration / Channel
+        list_frame = ttk.Frame(panel)
+        list_frame.grid(row=1, column=0, sticky="nsew")
+        list_frame.columnconfigure(0, weight=1)
+        list_frame.rowconfigure(0, weight=1)
+        cols = ("title", "dur", "channel")
+        self.search_tree = ttk.Treeview(list_frame, columns=cols, show="headings", selectmode="browse")
+        self.search_tree.heading("title", text="Title")
+        self.search_tree.heading("dur", text="Duration")
+        self.search_tree.heading("channel", text="Channel")
+        self.search_tree.column("title", width=220, stretch=True)
+        self.search_tree.column("dur", width=68, stretch=False, anchor="e")
+        self.search_tree.column("channel", width=110, stretch=False)
+        self.search_tree.grid(row=0, column=0, sticky="nsew")
+        vsb = ttk.Scrollbar(list_frame, orient="vertical", command=self.search_tree.yview)
+        vsb.grid(row=0, column=1, sticky="ns")
+        self.search_tree.configure(yscrollcommand=vsb.set)
+        self.search_tree.bind("<<TreeviewSelect>>", self._on_result_preview)
+        self.search_tree.bind("<Double-1>", lambda e: self._on_video_result_select())
+        self.search_tree.bind("<Return>", lambda e: self._on_video_result_select())
+
+    def _set_prev_thumbnail(self, pil_img: Image.Image) -> None:
+        pil_img = pil_img.copy()
+        pil_img.thumbnail((PREV_W, PREV_H))
+        canvas_img = Image.new("RGB", (PREV_W, PREV_H), (28, 28, 32))
+        ox = (PREV_W - pil_img.width) // 2
+        oy = (PREV_H - pil_img.height) // 2
+        canvas_img.paste(pil_img, (ox, oy))
+        self._prev_thumb_img = ImageTk.PhotoImage(canvas_img)
+        self._prev_canvas.delete("all")
+        self._prev_canvas.create_image(0, 0, anchor="nw", image=self._prev_thumb_img)
+
+    def _enter_search_mode(self) -> None:
+        self._lyrics_card.grid_remove()
+        self._search_panel.grid()
+
+    def _exit_search_mode(self) -> None:
+        self._search_panel.grid_remove()
+        self._lyrics_card.grid()
+
+    def _on_result_preview(self, _event=None) -> None:
+        sel = self.search_tree.selection()
+        if not sel:
+            return
+        idx = list(self.search_tree.get_children()).index(sel[0])
+        if idx < len(self._search_results):
+            self._preview_entry(self._search_results[idx])
+
+    def _preview_entry(self, entry: dict) -> None:
+        vid_id = entry.get("id", "")
+        self._search_panel_url = (
+            entry.get("webpage_url") or
+            (f"https://www.youtube.com/watch?v={vid_id}" if vid_id else "")
+        )
+        self._prev_title_var.set(entry.get("title") or "")
+        self._prev_channel_var.set(entry.get("uploader") or entry.get("channel") or "")
+        self._prev_dur_var.set(format_duration(entry.get("duration")))
+        state = ["!disabled"] if self._search_panel_url else ["disabled"]
+        self._btn_play_prev.state(state)
+        if vid_id:
+            thumb_url = f"https://img.youtube.com/vi/{vid_id}/mqdefault.jpg"
+            threading.Thread(target=self._fetch_prev_thumb, args=(thumb_url,), daemon=True).start()
+
+    def _fetch_prev_thumb(self, url: str) -> None:
+        try:
+            r = requests.get(url, timeout=8)
+            r.raise_for_status()
+            img = Image.open(io.BytesIO(r.content)).convert("RGB")
+            self.root.after(0, self._set_prev_thumbnail, img)
+        except Exception:
+            pass
+
+    def _play_preview(self) -> None:
+        if not self._search_panel_url:
+            return
+        if self._preview_proc and self._preview_proc.poll() is None:
+            self._preview_proc.terminate()
+            self._preview_proc = None
+        self._btn_play_prev.state(["disabled"])
+        self._set_status("Loading stream…")
+        threading.Thread(target=self._play_preview_worker,
+                         args=(self._search_panel_url,), daemon=True).start()
+
+    def _play_preview_worker(self, url: str) -> None:
+        try:
+            opts = {
+                "quiet": True, "no_warnings": True, "noplaylist": True,
+                "format": "best[height<=480][ext=mp4]/best[height<=480]/best",
+            }
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+            if "url" in info:
+                stream_url = info["url"]
+            elif info.get("requested_formats"):
+                stream_url = info["requested_formats"][0]["url"]
+            else:
+                stream_url = (info.get("formats") or [{}])[-1].get("url", "")
+            if not stream_url:
+                raise ValueError("No stream URL found")
+            title = info.get("title", "Preview")
+            ffplay = (shutil.which("ffplay") or
+                      (str(Path(FFMPEG_DIR) / "ffplay") if FFMPEG_DIR else None))
+            if not ffplay or not Path(ffplay).exists():
+                self.root.after(0, self._set_status, "ffplay not found — opening in browser")
+                self.root.after(0, webbrowser.open, url)
+                return
+            self._preview_proc = subprocess.Popen(
+                [ffplay, "-autoexit", "-window_title", f"Preview — {title}",
+                 "-x", "640", "-y", "360", stream_url],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            self.root.after(0, self._set_status, f"Playing: {title}")
+        except Exception as exc:
+            self.root.after(0, self._set_status, f"Preview failed: {exc}")
+        finally:
+            self.root.after(0, self._btn_play_prev.state, ["!disabled"])
 
     def _lyrics_font_larger(self) -> None:
         self._lyrics_font_size = min(32, self._lyrics_font_size + 1)
@@ -715,6 +861,12 @@ class DnlodApp:
         self.btn_search_yt.state(["disabled"])
         self.search_tree.delete(*self.search_tree.get_children())
         self._search_results = []
+        self._prev_title_var.set("")
+        self._prev_channel_var.set("")
+        self._prev_dur_var.set("")
+        self._set_prev_thumbnail(placeholder_thumb())
+        self._btn_play_prev.state(["disabled"])
+        self._enter_search_mode()
         self._set_status("Searching YouTube…")
         threading.Thread(target=self._search_video_worker, args=(query,), daemon=True).start()
 
@@ -731,23 +883,23 @@ class DnlodApp:
     def _populate_video_results(self, entries: list) -> None:
         self.btn_search_yt.state(["!disabled"])
         if not entries:
+            self._exit_search_mode()
             self._set_status("No results found.")
             return
         self._search_results = entries
         for e in entries:
             title = e.get("title") or "(untitled)"
-            uploader = e.get("uploader") or e.get("channel") or ""
+            channel = e.get("uploader") or e.get("channel") or "—"
             duration = format_duration(e.get("duration"))
-            label = f"{title}  —  {uploader}  ({duration})" if uploader else f"{title}  ({duration})"
-            self.search_tree.insert("", END, text=label)
-        self._results_frame.grid()
+            self.search_tree.insert("", END, values=(title, duration, channel))
         first = self.search_tree.get_children()[0]
         self.search_tree.selection_set(first)
         self.search_tree.focus(first)
-        self._set_status(f"{len(entries)} results — double-click or press Enter to load.")
+        self._set_status(f"{len(entries)} results — click to preview, double-click to load.")
 
     def _search_video_failed(self, msg: str) -> None:
         self.btn_search_yt.state(["!disabled"])
+        self._exit_search_mode()
         self._set_status(f"Search failed: {msg}")
 
     def _on_video_result_select(self) -> None:
@@ -763,7 +915,7 @@ class DnlodApp:
         if not url:
             return
         self.url_var.set(url)
-        self._results_frame.grid_remove()
+        self._exit_search_mode()
         self.on_fetch()
 
 
