@@ -579,6 +579,7 @@ class DnlodApp:
         dlg.transient(self.root)
         dlg.resizable(False, False)
         dlg.geometry("560x220")
+        dlg.grab_set()
 
         token_var = StringVar(value=self.config.get("genius_token", ""))
         dir_var = StringVar(value=self.config.get("default_output_dir", str(DEFAULT_DOWNLOADS)))
