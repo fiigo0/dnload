@@ -561,8 +561,7 @@ class DnlodApp:
         token = self.config.get("genius_token", "").strip()
         if not token or not HAVE_GENIUS:
             return ""
-        genius = lyricsgenius.Genius(token, verbose=False, remove_section_headers=False, timeout=15)
-        genius.skip_non_songs = True
+        genius = lyricsgenius.Genius(token, remove_section_headers=False, skip_non_songs=True, timeout=15)
         hit = genius.search_song(song, artist) if artist else genius.search_song(song)
         if hit is None:
             return ""
