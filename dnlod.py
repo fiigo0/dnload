@@ -757,7 +757,7 @@ class Teleprompter(Toplevel):
         self.minsize(560, 400)
 
         self.playing = False
-        self.speed = 25  # 0..100, scroll units per tick
+        self.speed = 12  # 0..100, scroll units per tick
         self.font_size = 32
         self.mirror = False
         self.bg = "#0a0a0a" if dark else "#fafafa"
