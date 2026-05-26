@@ -164,6 +164,7 @@ class DnlodApp:
         self.source_var = StringVar(value="lyrics.ovh")
         self.status_var = StringVar(value="Ready.")
         self.theme_var = BooleanVar(value=self.config.get("theme", "dark") == "dark")
+        self._lyrics_font_size: int = self.config.get("lyrics_font_size", 11)
 
         self._thumb_img: ImageTk.PhotoImage | None = None  # keep ref
 
@@ -326,6 +327,8 @@ class DnlodApp:
         ttk.Button(src, text="Search Lyrics", command=self.on_search_lyrics,
                    style="Accent.TButton").pack(side="right")
         ttk.Button(src, text="▶  Teleprompter", command=self.open_teleprompter).pack(side="right", padx=(0, 8))
+        ttk.Button(src, text="A+", width=3, command=self._lyrics_font_larger).pack(side="right", padx=(0, 4))
+        ttk.Button(src, text="A-", width=3, command=self._lyrics_font_smaller).pack(side="right", padx=(0, 2))
 
         ttk.Separator(card, orient="horizontal").grid(row=2, column=0, sticky="ew", pady=(6, 8))
 
@@ -335,7 +338,7 @@ class DnlodApp:
         box.columnconfigure(0, weight=1)
         box.rowconfigure(0, weight=1)
         self.lyrics_text = Text(box, wrap="word", relief="flat", borderwidth=0,
-                                font=("TkDefaultFont", 11), padx=8, pady=8)
+                                font=("TkDefaultFont", self._lyrics_font_size), padx=8, pady=8)
         scroll = Scrollbar(box, command=self.lyrics_text.yview)
         self.lyrics_text.configure(yscrollcommand=scroll.set)
         self.lyrics_text.grid(row=0, column=0, sticky="nsew")
@@ -347,6 +350,18 @@ class DnlodApp:
             self.lyrics_text.configure(bg="#1f1f1f", fg="#e6e6e6", insertbackground="#e6e6e6")
         else:
             self.lyrics_text.configure(bg="#ffffff", fg="#202020", insertbackground="#202020")
+
+    def _lyrics_font_larger(self) -> None:
+        self._lyrics_font_size = min(32, self._lyrics_font_size + 1)
+        self.lyrics_text.configure(font=("TkDefaultFont", self._lyrics_font_size))
+        self.config["lyrics_font_size"] = self._lyrics_font_size
+        save_config(self.config)
+
+    def _lyrics_font_smaller(self) -> None:
+        self._lyrics_font_size = max(7, self._lyrics_font_size - 1)
+        self.lyrics_text.configure(font=("TkDefaultFont", self._lyrics_font_size))
+        self.config["lyrics_font_size"] = self._lyrics_font_size
+        save_config(self.config)
 
     # ---------- theme ----------
     def on_toggle_theme(self) -> None:
